@@ -6,6 +6,7 @@ from pyspark.sql import DataFrame
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import lit
 from pyspark.sql.functions import desc
+from pyspark.sql.functions import avg
 from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml.recommendation import ALS
 
@@ -32,6 +33,8 @@ you should use them. Don't modify them!
 
 #Initialize a spark session.
 def init_spark():
+    import findspark
+    findspark.init()
     spark = SparkSession \
         .builder \
         .appName("Python Spark SQL basic example") \
@@ -75,7 +78,31 @@ def basic_als_recommender(filename, seed):
     - coldStartStrategy: 'drop'
     Test file: tests/test_basic_als.py
     '''
-    return 0
+
+    # initialize SparkSession
+    spark = init_spark()
+
+    # load data
+    lines = spark.read.text(filename).rdd
+    parts = lines.map(lambda row: row.value.split("::"))
+    ratingsRDD = parts.map(lambda p: Row(userId=int(p[0]), movieId=int(p[1]), rating=float(p[2]), timestamp=int(p[3])))
+    ratings = spark.createDataFrame(ratingsRDD)
+
+    # Split dataset into training and test sets, and including the random seed
+    (training, test) = ratings.randomSplit([0.8, 0.2], seed=seed)
+
+    # Train the ALS model
+    als = ALS(maxIter=5, rank=70, regParam=0.01, seed=seed, coldStartStrategy="drop",
+              userCol="userId", itemCol="movieId", ratingCol="rating")
+    model = als.fit(training)
+
+    # Evaluate the RMSE of the recommendations
+    predictions = model.transform(test)
+    evaluator = RegressionEvaluator(metricName="rmse", labelCol="rating",
+                                    predictionCol="prediction")
+    rmse = evaluator.evaluate(predictions)
+
+    return rmse
 
 def global_average(filename, seed):
     '''
@@ -84,7 +111,26 @@ def global_average(filename, seed):
     sets should be determined as before (e.g: as in function basic_als_recommender).
     Test file: tests/test_global_average.py
     '''
-    return 0
+
+    # initialize SparkSession
+    spark = init_spark()
+
+    # load data
+    lines = spark.read.text(filename).rdd
+    parts = lines.map(lambda row: row.value.split("::"))
+    ratingsRDD = parts.map(lambda p: Row(userId=int(p[0]), movieId=int(p[1]), rating=float(p[2]), timestamp=int(p[3])))
+    ratings = spark.createDataFrame(ratingsRDD)
+
+    # Split dataset into training and test sets, and including the random seed
+    (training, test) = ratings.randomSplit([0.8, 0.2], seed=seed)
+
+    # calculate the average in the "rating" column
+    # it returns a 1-row 1-column dataframe
+    # extract the dataframe as a python list
+    # index to retrieve the average value
+    average = training.select(avg("rating")).collect()[0][0]
+
+    return average
 
 def global_average_recommender(filename, seed):
     '''
